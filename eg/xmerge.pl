@@ -1,25 +1,16 @@
 #!/usr/bin/perl -w
+
 use strict;
 use lib '/home/sergeant/perl/lib';
 use vars qw/$htmlfile $xmlfile $outputfile $help $verbose $p $xml $html/;
-
-#########################
-# XMERGE
-#########################
-# This script merges an XML source file
-# with an XML data file. I use this to
-# generate my CV, both statically on the
-# command line, and dynamically on the web.
-# For the web, the form parameters you
-# need are 'htsrc' and 'xmsrc' or 'xml'
-# See http://sergeant.org for an example of usage
-
 
 use XML::Parser;
 use XML::miniXQL;
 use Data::Dumper;
 use CGI;
 use Getopt::Long;
+
+local $p;
 
 sub usage;
 
@@ -91,15 +82,15 @@ my $searcher = new XML::Parser(
 my $searches;
 eval {
 	$searches = $searcher->parse($html);
-#	print "Searches:\n", $#{$searches}, "\n", (join "\n", @{$searches});
-#	print "\n\n";
+#	print STDERR "Searches:\n", $#{$searches}, "\n", (join "\n", @{$searches});
+#	print STDERR "\n\n";
 };
 if ($@) {
 	die $@ . " in search of $htmlfile";
 }
 
 # OK - Got our searches - now use XML::miniXQL to retrieve values...
-my $results = XML::miniXQL::queryXML($xml, @{$searches});
+my $results = XML::miniXQL::queryXML({Style => 'Hash'}, $xml, @{$searches});
 if (!ref $results) {
 	die "Query of $xmlfile failed\n";
 }
@@ -149,7 +140,10 @@ sub StartTag {
 
 	if ($expat->namespace($element) eq 'http://www.sergeant.org/xmerge') {
 		if ($element eq 'repeat') {
-			$expat->{repeat} = 1;
+			if ($expat->{repeat}) {
+				# Oh bugger... embedded repeats. What to do...
+			}
+			$expat->{repeat}++;
 		}
 		elsif ($element eq 'replace') {
 			my $search = $attribs{name};
@@ -205,6 +199,10 @@ sub encode {
 sub maketag {
 	my $open = shift;
 	my $element = shift;
+	my $ns = shift;
+	if ($ns) {
+		$element = "$ns:$element";
+	}
 	my ($attribs) = @_;
 	my $tag = "<" . ($open ? '' : '/') . $element;
 	if (defined $attribs) {
@@ -221,7 +219,16 @@ sub StartTag {
 	my %attribs = %_;
 
 	if ($expat->namespace($element) eq 'http://www.sergeant.org/xmerge') {
+
+		# Deal with replacements. Essentially just print out the replacement value,
+		# unless we are in a repeat section, and then build up the repeat xml.
+
 		if ($element eq 'replace') {
+
+			foreach (keys %{$expat->{Assignments}}) {
+				$attrib{name} =~ s/\b\$$_\b/$expat->{$Assignments}->{$_}/g;
+			}
+
 			if ($expat->{repeat}) {
 				if (!$expat->{numrepeat}) {
 					if ($expat->{repeat} > 0) {
@@ -233,18 +240,24 @@ sub StartTag {
 						};
 					}
 				}
-				$expat->{html} .= maketag(1, $element, \%attribs);
+				$expat->{html} .= maketag(1, $element, 'xmerge', \%attribs);
 			}
+
 			else {
 				eval {
 					print shift @{$expat->{Replacements}->{$attribs{name}}};
 				};
 			}
+
 		}
+
+		# Turn on repeat
 		elsif ($element eq 'repeat') {
 			$expat->{repeat} = $attribs{max} || -1; # -1 is true
-			$expat->{html} = "<repeater>";
+			$expat->{html} = "<repeater xmlns:xmerge=\"http://www.sergeant.org/xmerge\">";
 		}
+
+		# If doing an attribute replacement, print out the tag with the attribute.
 		elsif ($element eq 'attrib') {
 			if ($expat->{repeat}) {
 				if (!$expat->{numrepeat}) {
@@ -257,7 +270,7 @@ sub StartTag {
 						};
 					}
 				}
-				$expat->{html} .= maketag(1, $element, \%attribs);
+				$expat->{html} .= maketag(1, $element, 'xmerge', \%attribs);
 			}
 			else {
 				eval {
@@ -268,14 +281,16 @@ sub StartTag {
 					delete $attribs{tag};
 					$expat->{attribtag} = $tag;
 					%attribs = (%attribs, @{$expat->{attribname}});
-					print maketag(1, $tag, \%attribs);
+					print maketag(1, $tag, '', \%attribs);
 				};
 			}
 		}
 	}
+
+	# Otherwise either just build up more of the repeat section, or print.
 	else {
 		if ($expat->{repeat}) {
-			$expat->{html} .= maketag(1, $element, \%attribs);
+			$expat->{html} .= maketag(1, $element, '', \%attribs);
 		}
 		else {
 			print;
@@ -288,6 +303,11 @@ sub EndTag {
 	my $element = shift;
 
 	if ($expat->namespace($element) eq 'http://www.sergeant.org/xmerge') {
+
+		# Come to the end of a repeat section. Now we must re-parse the
+		# XML that we built up in the other handlers. We re-parse it
+		# the number of times the containing replacements repeat.
+
 		if ($element eq 'repeat') {
 			$expat->{repeat} = 0;
 			# OK - now we have to parse the repeat section as many times as we
@@ -298,8 +318,8 @@ sub EndTag {
 
 			my $repeater = new XML::Parser(
 				Style=> 'Stream',
-				Pkg => 'Repeater',
-				Namespaces => 0, # Already blatted all our namespaces :-(((
+				Pkg => 'Replacer',
+				Namespaces => 1,
 				Replacements => $expat->{Replacements}, # Gets passed to $expat
 				ErrorContext => 2,
 				);
@@ -317,20 +337,20 @@ sub EndTag {
 		}
 		elsif ($element eq 'attrib') {
 			if ($expat->{repeat}) {
-				$expat->{html} .= maketag(0, $element);
+				$expat->{html} .= maketag(0, $element, 'xmerge');
 			}
 			else {
-				print maketag(0, $expat->{attribtag});
+				print maketag(0, $expat->{attribtag}, '');
 				delete $expat->{attribtag};
 			}
 		}
 		elsif ($expat->{repeat}) {
-			$expat->{html} .= maketag(0, $element);
+			$expat->{html} .= maketag(0, $element, 'xmerge');
 		}
 	}
 	else {
 		if ($expat->{repeat}) {
-			$expat->{html} .= maketag(0, $element);
+			$expat->{html} .= maketag(0, $element, '');
 		}
 		else {
 			print;
@@ -352,6 +372,8 @@ sub Text {
 
 ########################################################
 # Repeater
+# This is deprecated, probably not even used...
+
 
 package Repeater;
 
@@ -379,5 +401,3 @@ sub EndTag {
 }
 
 1;
-
-__END__

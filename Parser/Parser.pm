@@ -11,7 +11,7 @@ require AutoLoader;
 # names by default without a very good reason. Use EXPORT_OK instead.
 # Do not simply export all your public functions/methods/constants.
 @EXPORT = qw(
-	
+
 );
 $VERSION = '0.01';
 
@@ -106,20 +106,20 @@ sub buildSelf {
 	if ($self->{_path} =~ s/\*$//) {
 		$self->{_repeat} = 1;
 	}
-	
+
 #	warn "Building from ", $self->{_path}, "\n";
-	
-	
+
+
 	my @parts = split('/', $self->{_path});
 	my @fullpath;
 	$self->{Relative} = 0;
-	
+
 	if ($self->{_path} !~ /^\//) {
 		# It's a relative path
 
 		$self->{_relative} = 1;
 		@fullpath = @{$prev->{_fullpath}};
-		
+
 		if ($prev->isRelative) {
 			# prev was a relative path so remove top item
 			pop @fullpath;
@@ -138,13 +138,13 @@ sub buildSelf {
 		shift @parts;
 		@fullpath = @parts;
 	}
-	
+
 	if ($fullpath[$#fullpath] =~ /^\@(\w+)$/) {
 		pop @fullpath;
 		pop @parts;
 		$self->{_attrib} = $1;
 	}
-	
+
 	$self->{Parts} = \@parts;
 	$self->{_fullpath} = \@fullpath;
 
@@ -168,11 +168,11 @@ sub isRepeat {
 sub isChildPath {
 	my $self = shift;
 	my $compare = shift;
-	
+
 	# Now compare each level of the tree, and throw away attributes.
 	my @a = @{$self->{_fullpath}};
 	my @b = @{$compare->{_fullpath}};
-	
+
 	if (@a >= @b) {
 		return 0;
 	}
@@ -191,19 +191,19 @@ sub Attrib {
 sub isEqual {
 	my $self = shift;
 	my $compare = shift;
-	
+
 	my @a = @{$self->{_fullpath}};
 	my @b = @{$compare->{_fullpath}};
-	
+
 #	warn "Comparing: ", $self->FullPath, "\nTo      : ", $compare->FullPath,
 #	"\n";
 	if (scalar @a != scalar @b) {
 		return 0;
 	}
 	foreach (0..$#a) {
-		$a[$_] =~ s/\[.*\]//;
-		$b[$_] =~ s/\[.*\]//;
-		if ($a[$_] ne $b[$_]) {
+#		$a[$_] =~ s/\[.*\]//;
+#		$b[$_] =~ s/\[.*\]//;
+		if (!_comparePart($a[$_], $b[$_])) {
 			return 0;
 		}
 	}
@@ -217,7 +217,7 @@ sub Append {
 	my %attribs = @_;
 	if (%attribs) {
 		$element .= "[";
-		
+
 		$element .= join " and ",
 					(map "\@$_=\"$attribs{$_}\"", (keys %attribs));
 		$element .= "]";
@@ -243,6 +243,66 @@ sub FullPath {
 	my $path = "/" . (join "/", @{$self->{_fullpath}});
 	$path .= ($self->Attrib ? "/\@" . $self->Attrib : '');
 	$path;
+}
+
+sub _comparePart {
+	my ($a, $b) = @_;
+
+	my $a_elem;
+	my $a_attribs = '';
+	my $a_attribs_ref;
+
+	if ($a =~ /(.*)\[(.*)\]/) {
+		$a_elem = $1;
+		$a_attribs = $2;
+	}
+	else {
+		$a_elem = $a;
+	}
+
+	my $b_elem;
+	my $b_attribs = '';
+	my $b_attribs_ref;
+
+	if ($b =~ /(.*)\[(.*)\]/) {
+		$b_elem = $1;
+		$b_attribs = $2;
+	}
+	else {
+		$b_elem = $b;
+	}
+
+	return 0 if !defined $b_elem;
+	if ($a_elem ne $b_elem) {
+		return 0;
+	}
+
+	if (!$b_attribs && !$a_attribs) {
+		return 1;
+	}
+
+	# Element is same - now split attribs
+	foreach (split /\s+and\s+/, $a_attribs) {
+		my ($key, $value) = split /\s*=\s*/;
+		$a_attribs_ref->{$key} = $value;
+	}
+
+	foreach (split /\s+and\s+/, $b_attribs) {
+		my ($key, $value) = split /\s*=\s*/;
+		$b_attribs_ref->{$key} = $value;
+	}
+
+	foreach (keys (%{$a_attribs_ref})) {
+		if (!defined($b_attribs_ref->{$_})) {
+			return 0;
+		}
+		if ($a_attribs_ref->{$_} ne $b_attribs_ref->{$_}) {
+			return 0;
+		}
+	}
+
+	return 1;
+
 }
 
 1;

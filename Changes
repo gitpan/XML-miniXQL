@@ -9,3 +9,8 @@ Revision history for Perl extension XML::miniXQL.
 	- Added CGI support to xmerge
 	- Added attribute support to xmerge
 	- First CPAN Release
+
+0.04  Wed Jun 16 1999
+	- Attribute searching was broken
+	- xmerge didn't specify the style.
+

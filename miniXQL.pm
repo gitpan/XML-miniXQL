@@ -12,7 +12,7 @@ require Exporter;
 @EXPORT = qw(
 );
 
-$VERSION = '0.03';
+$VERSION = '0.04';
 
 
 sub queryXML {
